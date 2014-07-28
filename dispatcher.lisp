@@ -11,9 +11,21 @@
 	#+mcl :ccl
 	#+cmu :clos-mop
 	#+sbcl :sb-mop)
-  (:export :def-pfun :send-pfun :receive-pfun :remote-call))
+  (:export :def-pfun :send-pfun :remote-call))
 
 (in-package :func-dispatch)
+
+(defvar *binded-package* *package*)
+(defvar *server-name* nil)
+
+(defun start-function-server (&key (port 8080))
+  (setf *binded-package* *package*)
+  (setf *server-name* (start-xml-rpc-server :port port)))
+
+(defun stop-function-server ()
+  (when (eql nil *server-name*) (error "Server not started"))
+  (stop-server *server-name*)
+  (setf *server-name* nil))
 
 (defclass function-with-definition ()
   ((func-name :accessor function-name
@@ -68,7 +80,9 @@
 	  (when portp (list :port port))))
 
 (defun receive_pfun (pfun-str)
-  (let* ((unmarshaled (string->obj pfun-str)) (symbol (intern (symbol-name (function-name unmarshaled)) :func-dispatch)))
+  (let* ((*package* *binded-package*)
+	 (unmarshaled (string->obj pfun-str)) 
+	 (symbol (intern (symbol-name (function-name unmarshaled)) :func-dispatch)))
     (update-funcallable-function unmarshaled)
     (setf (symbol-function symbol) unmarshaled)
     pfun-str))
