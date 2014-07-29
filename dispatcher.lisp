@@ -11,7 +11,9 @@
 	#+mcl :ccl
 	#+cmu :clos-mop
 	#+sbcl :sb-mop)
-  (:export :def-pfun :send-pfun :remote-call))
+  (:export :def-pfun :send-pfun 
+	   :remote-eval :start-function-server 
+	   :stop-function-server :force-write-svar))
 
 (in-package :func-dispatch)
 
@@ -46,7 +48,8 @@
     (set-funcallable-instance-function obj (compile nil definition))))
 
 (defmethod (setf function-definition) :after ((obj function-with-definition) func-def)
-  (unless (eql nil func-def) (set-funcallable-instance-function obj (compile nil func-def))))
+  (unless (eql nil func-def) 
+    (set-funcallable-instance-function obj (compile nil func-def))))
 
 (defmethod update-funcallable-function ((obj function-with-definition))
   (let ((lambda-def (function-definition obj)))
@@ -63,6 +66,22 @@
   (with-input-from-string (stream string)
     (unmarshal (read stream))))
 
+;; write svar (shared variable) to remote server
+(defmacro force-write-svar (var-name &key (host nil hostp) (port nil portp))
+  (append `(xml-rpc-call 
+	    (encode-xml-rpc-call "OVERWRITE_SVAR" (obj->string 
+						   (list ',var-name ,var-name))))
+	  (when hostp (list :host host))
+	  (when portp (list :port port))))
+
+(defun overwrite_svar (str)
+  (let* ((*package* *binded-package*)
+	 (unmarshaled (string->obj str))
+	 (symbol (intern (symbol-name (car unmarshaled)) *package*)))
+    (setf (symbol-value symbol) (cadr unmarshaled))
+    str))
+
+;; pfun is for "portable function"
 (defmacro def-pfun (name args &body body)
   `(progn 
      (declaim (notinline ,name))
@@ -82,7 +101,19 @@
 (defun receive_pfun (pfun-str)
   (let* ((*package* *binded-package*)
 	 (unmarshaled (string->obj pfun-str)) 
-	 (symbol (intern (symbol-name (function-name unmarshaled)) :func-dispatch)))
+	 (symbol (intern (symbol-name (function-name unmarshaled)) *package*)))
     (update-funcallable-function unmarshaled)
     (setf (symbol-function symbol) unmarshaled)
     pfun-str))
+
+(defmacro remote-eval (expression &key (host nil hostp) (port nil portp))
+  (append `(xml-rpc-call 
+	    (encode-xml-rpc-call "REMOTE_EVAL_HANDLER" (obj->string ',expression)))
+	  (when hostp (list :host host))
+	  (when portp (list :port port))))
+
+(defun remote_eval_handler (str)
+  (let* ((*package* *binded-package*)
+	 (unmarshaled (string->obj str)))
+    (eval unmarshaled)
+    str))
